@@ -11,7 +11,13 @@ each stage *before* the analyst view and detection logic are revealed.
 The only external resource is [Prism.js](https://prismjs.com/) via CDN for
 syntax-highlighting the detection queries.
 
-![Screenshot of the walkthrough at step 6 — the kill-chain tactics bar shows passed tactics in green, the current tactic (Credential Access) highlighted, and unused tactics greyed; below, an answered quiz reveals the analyst view, log source, and a syntax-highlighted Sentinel KQL detection.](screenshot.png)
+**Landing view** — scenario briefing and entry point:
+
+![Landing view: the title "Anatomy of a BFSI Ransomware Intrusion", the threat archetype and target profile, the learning objective, and a Start Walkthrough button noting 12 steps across 10 of 14 ATT&CK tactics.](screenshot-landing.png)
+
+**Step view** (step 6) — the kill-chain tactics bar shows passed tactics in green, the current tactic (Credential Access) highlighted, and unused tactics greyed; below, an answered quiz reveals the analyst view, log source, and a syntax-highlighted Sentinel KQL detection:
+
+![Step 6 of the walkthrough showing the tactics progress bar, narrative, an answered quiz marked correct, and the revealed analyst view and Sentinel KQL detection block.](screenshot.png)
 
 ## Run locally
 
