@@ -1,5 +1,7 @@
 # BFSI Ransomware Walkthrough — Interactive ATT&CK Teaching Tool
 
+**▶ Live demo: https://sai-teja-girimaji.github.io/bfsi-ransomware-walkthrough/**
+
 A static, single-page interactive teaching tool that walks students through a
 BFSI (banking / financial services) ransomware intrusion **one MITRE ATT&CK
 tactic at a time**. Built for classroom / projector use: answer a question at
