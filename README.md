@@ -21,7 +21,13 @@ syntax-highlighting the detection queries.
 
 **Tablet / responsive** (768px wide) — the 14-tactic bar reflows to two rows and the layout stacks for narrower screens, down to tablet width:
 
-<p align="center"><img src="screenshot-tablet.png" alt="The walkthrough at tablet width (768px): the tactics bar has reflowed into two rows of seven, with the narrative, an answered quiz, and a syntax-highlighted Sigma detection stacked below." width="420" /></p>
+<p align="center">
+  <img src="screenshot-tablet.png" alt="The walkthrough at tablet width (768px): the tactics bar has reflowed into two rows of seven, with the narrative, an answered quiz, and a syntax-highlighted Sigma detection stacked below." width="420" />
+  &nbsp;&nbsp;
+  <img src="screenshot-phone.png" alt="The walkthrough at phone width (390px): the tactics bar is a two-column grid, the header wraps, and the Previous/Next controls stack into full-width buttons. The quiz gate is visible — Next is disabled until the question is answered." width="240" />
+</p>
+
+<p align="center"><em>Tablet (768px, left) and phone (390px, right) — the tactics bar drops to two columns and navigation stacks; the phone view shows the quiz gate holding Next until an answer is committed.</em></p>
 
 ## Run locally
 
