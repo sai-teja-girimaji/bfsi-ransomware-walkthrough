@@ -19,6 +19,10 @@ syntax-highlighting the detection queries.
 
 ![Step 6 of the walkthrough showing the tactics progress bar, narrative, an answered quiz marked correct, and the revealed analyst view and Sentinel KQL detection block.](screenshot.png)
 
+**Tablet / responsive** (768px wide) — the 14-tactic bar reflows to two rows and the layout stacks for narrower screens, down to tablet width:
+
+<p align="center"><img src="screenshot-tablet.png" alt="The walkthrough at tablet width (768px): the tactics bar has reflowed into two rows of seven, with the narrative, an answered quiz, and a syntax-highlighted Sigma detection stacked below." width="420" /></p>
+
 ## Run locally
 
 Browsers block `fetch()` on `file://` URLs, so serve the folder over HTTP:
