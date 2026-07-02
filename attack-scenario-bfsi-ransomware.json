@@ -1,0 +1,303 @@
+{
+  "scenario": {
+    "title": "Anatomy of a BFSI Ransomware Intrusion",
+    "threat_archetype": "Financially-motivated ransomware affiliate (double-extortion, LockBit-style playbook)",
+    "target_profile": "Mid-size commercial bank — corporate treasury and back-office Windows estate, hybrid Microsoft 365 / on-prem Active Directory",
+    "learning_objective": "Trace a ransomware intrusion tactic-by-tactic across the MITRE ATT&CK Enterprise matrix, and for each stage decide what an analyst would actually see in telemetry before the encryption event ever fires.",
+    "total_steps": 12
+  },
+  "tactics_legend": [
+    { "id": "reconnaissance",       "name": "Reconnaissance",        "attack_id": "TA0043" },
+    { "id": "resource-development",  "name": "Resource Development",  "attack_id": "TA0042" },
+    { "id": "initial-access",        "name": "Initial Access",        "attack_id": "TA0001" },
+    { "id": "execution",             "name": "Execution",             "attack_id": "TA0002" },
+    { "id": "persistence",           "name": "Persistence",           "attack_id": "TA0003" },
+    { "id": "privilege-escalation",  "name": "Privilege Escalation",  "attack_id": "TA0004" },
+    { "id": "defense-evasion",       "name": "Defense Evasion",       "attack_id": "TA0005" },
+    { "id": "credential-access",     "name": "Credential Access",     "attack_id": "TA0006" },
+    { "id": "discovery",             "name": "Discovery",             "attack_id": "TA0007" },
+    { "id": "lateral-movement",      "name": "Lateral Movement",      "attack_id": "TA0008" },
+    { "id": "collection",            "name": "Collection",            "attack_id": "TA0009" },
+    { "id": "command-and-control",   "name": "Command and Control",   "attack_id": "TA0011" },
+    { "id": "exfiltration",          "name": "Exfiltration",          "attack_id": "TA0010" },
+    { "id": "impact",                "name": "Impact",                "attack_id": "TA0040" }
+  ],
+  "steps": [
+    {
+      "narrative": "At 08:14 a treasury operations analyst opens an email themed as a SWIFT settlement discrepancy from a known correspondent bank. The attached document, 'MT103_Remittance_Advice.docm', asks the user to Enable Content to view the 'secured' remittance. The lure is timed for the start of the settlement window, when the team is busiest and least skeptical.",
+      "tactic": "initial-access",
+      "technique": { "id": "T1566.001", "name": "Spearphishing Attachment" },
+      "analyst_view": "This never trips an AV signature — the .docm carries no malware, only a macro that will reach out later. Your earliest signal is mail-layer: a macro-enabled attachment from an external sender whose display name spoofs a trusted correspondent, delivered to a finance distribution list. Treat 'Enable Content' finance lures as a high-fidelity phishing indicator, not spam.",
+      "log_source": "Microsoft Defender for Office 365 / Exchange Online message trace",
+      "detection": {
+        "platform": "Sentinel KQL",
+        "query": "EmailAttachmentInfo\n| where FileName endswith \".docm\" or FileName endswith \".xlsm\"\n| join kind=inner EmailEvents on NetworkMessageId\n| where SenderFromDomain !endswith \"yourbank.com\"\n| where RecipientEmailAddress in~ (_GetWatchlist('treasury_distribution_lists'))\n| project Timestamp, SenderFromAddress, RecipientEmailAddress, FileName, Subject, ThreatTypes"
+      },
+      "quiz": {
+        "question": "The attachment carries no executable payload — only a macro that phones home when the document is opened. What is the earliest reliable detection surface for this stage?",
+        "options": [
+          "Endpoint AV signature on the .docm file",
+          "Mail-layer telemetry: macro-enabled attachment from an external look-alike sender to a finance group",
+          "Firewall egress logs at the perimeter",
+          "Domain controller authentication logs"
+        ],
+        "correct_index": 1,
+        "explanation": "Because the document is benign until the macro runs, signature-based AV and egress/DC logs have nothing to catch yet. The mail layer is the first place the attack is observable — a macro-enabled file from an external look-alike sender aimed at treasury is the high-fidelity signal here."
+      }
+    },
+    {
+      "narrative": "The analyst clicks Enable Content. The VBA macro spawns from WINWORD.EXE and drops a loader to %APPDATA%, establishing the first foothold on the endpoint. The document itself shows a blurred 'decrypting…' image to keep the user waiting while the macro works.",
+      "tactic": "execution",
+      "technique": { "id": "T1204.002", "name": "Malicious File" },
+      "analyst_view": "The tell is the process lineage: WINWORD.EXE spawning a child process is abnormal for a document that should just be read. An Office application launching a script interpreter, or writing and executing a binary from a user-writable path, is one of the most reliable early-execution detections you have.",
+      "log_source": "EDR process-creation telemetry (Microsoft Defender for Endpoint / Sysmon Event ID 1)",
+      "detection": {
+        "platform": "Microsoft Defender KQL",
+        "query": "DeviceProcessEvents\n| where InitiatingProcessFileName in~ (\"winword.exe\", \"excel.exe\", \"outlook.exe\")\n| where FileName in~ (\"powershell.exe\", \"cmd.exe\", \"wscript.exe\", \"cscript.exe\", \"mshta.exe\", \"rundll32.exe\")\n| project Timestamp, DeviceName, AccountName, InitiatingProcessFileName, FileName, ProcessCommandLine"
+      },
+      "quiz": {
+        "question": "Which single behavioural signal most reliably distinguishes this malicious execution from a user simply reading a Word document?",
+        "options": [
+          "The document file is larger than 1 MB",
+          "WINWORD.EXE spawns a child process such as powershell.exe or a dropped binary",
+          "The user opened the email on a Monday",
+          "The mailbox received more than 10 emails that hour"
+        ],
+        "correct_index": 1,
+        "explanation": "A document being read produces no child processes. WINWORD.EXE spawning an interpreter or a dropped executable is the anomaly — parent/child process lineage is the core of early-execution detection here."
+      }
+    },
+    {
+      "narrative": "The loader relaunches itself through PowerShell with an encoded command, pulling the next-stage implant into memory. Nothing malicious is written to disk at this step — the payload lives in the PowerShell process's memory, a deliberate move to defeat file-based scanning.",
+      "tactic": "execution",
+      "technique": { "id": "T1059.001", "name": "PowerShell" },
+      "analyst_view": "Encoded PowerShell (-enc / -EncodedCommand) with no corresponding script file on disk is a durable behavioural indicator. Pair the command-line telemetry with Script Block Logging (Event ID 4104) so you can see the decoded intent — download cradles, IEX, and reflective loading all light up here even when the on-disk artefact is absent.",
+      "log_source": "PowerShell Script Block Logging (Event ID 4104) + EDR command-line capture",
+      "detection": {
+        "platform": "Splunk SPL",
+        "query": "index=windows (EventCode=4104 OR EventCode=4688)\n| eval cmd=lower(coalesce(ScriptBlockText, Process_Command_Line))\n| search cmd=\"*-enc*\" OR cmd=\"*-encodedcommand*\" OR cmd=\"*frombase64string*\" OR cmd=\"*iex*\" OR cmd=\"*downloadstring*\"\n| stats count values(cmd) as commands by host, User\n| where count > 0"
+      },
+      "quiz": {
+        "question": "The implant runs entirely in PowerShell memory with no script written to disk. Which log source best exposes what the encoded command actually did?",
+        "options": [
+          "Antivirus quarantine logs",
+          "PowerShell Script Block Logging (Event ID 4104)",
+          "DHCP lease logs",
+          "Printer spooler logs"
+        ],
+        "correct_index": 1,
+        "explanation": "With nothing on disk, file-based AV is blind. Script Block Logging (4104) records the decoded script content itself, exposing the download cradle and in-memory loading that the -enc flag was hiding."
+      }
+    },
+    {
+      "narrative": "To survive a reboot, the implant writes a Run key under HKCU that relaunches the loader at every logon. It masquerades the value name as 'OneDriveStandaloneUpdater' to blend into a legitimate-looking autostart entry.",
+      "tactic": "persistence",
+      "technique": { "id": "T1547.001", "name": "Registry Run Keys / Startup Folder" },
+      "analyst_view": "Run-key persistence is noisy if you baseline it. The signal is a new HKCU\\...\\Run value pointing at a user-writable path (%APPDATA%, %TEMP%) or an LOLBin, especially one impersonating a known updater. Legitimate updaters live in Program Files and are signed — a 'OneDrive' updater running from AppData is the giveaway.",
+      "log_source": "Sysmon Event ID 13 (registry value set) / EDR registry telemetry",
+      "detection": {
+        "platform": "Sigma",
+        "query": "title: Suspicious Run Key From User-Writable Path\nlogsource:\n  product: windows\n  category: registry_set\ndetection:\n  selection:\n    TargetObject|contains:\n      - '\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\'\n    Details|contains:\n      - '\\AppData\\'\n      - '\\Temp\\'\n      - '\\ProgramData\\'\n  condition: selection\nlevel: high\n# Enrichment note: correlate Details path against signed-binary asset inventory."
+      },
+      "quiz": {
+        "question": "A new Run key named 'OneDriveStandaloneUpdater' points at a binary in %APPDATA%. Why is this suspicious despite the trustworthy-sounding name?",
+        "options": [
+          "OneDrive is not a Microsoft product",
+          "Legitimate updaters are signed and run from Program Files, not a user-writable AppData path",
+          "Run keys are never used by legitimate software",
+          "The name is spelled incorrectly"
+        ],
+        "correct_index": 1,
+        "explanation": "The name is deliberate camouflage. The genuine OneDrive updater is signed and lives under Program Files; a Run value launching an unsigned binary from AppData is the anomaly — path and signature, not the friendly name, are what you trust."
+      }
+    },
+    {
+      "narrative": "Before touching credentials, the operator blinds the endpoint. Using the treasury user's local admin rights, they add exclusion paths to Microsoft Defender and stop the EDR sensor service, clearing the way for the credential-theft tooling to run unseen.",
+      "tactic": "defense-evasion",
+      "technique": { "id": "T1562.001", "name": "Impair Defenses: Disable or Modify Tools" },
+      "analyst_view": "Tampering with the security stack is itself a high-severity detection — arguably higher-fidelity than what it's trying to hide. Watch for Set-MpPreference exclusions, 'sc stop' / service-disable against EDR services, and sudden sensor-heartbeat loss. A managed endpoint going quiet is not 'no news'; it is the news.",
+      "log_source": "Defender AV configuration-change events + EDR sensor-health / tamper-protection telemetry",
+      "detection": {
+        "platform": "Microsoft Defender KQL",
+        "query": "DeviceProcessEvents\n| where ProcessCommandLine has_any (\"Set-MpPreference\", \"Add-MpPreference\", \"-ExclusionPath\", \"-DisableRealtimeMonitoring\")\n    or (ProcessCommandLine has \"sc\" and ProcessCommandLine has_any (\"stop\", \"config\") and ProcessCommandLine has_any (\"Sense\", \"WdNisSvc\", \"SentinelAgent\", \"CSFalcon\"))\n| project Timestamp, DeviceName, AccountName, ProcessCommandLine, InitiatingProcessFileName"
+      },
+      "quiz": {
+        "question": "The endpoint's EDR sensor stops sending heartbeats right after a 'sc stop' command. How should a SOC treat this silence?",
+        "options": [
+          "As a benign gap — the machine was probably shut down",
+          "As a high-severity event — a managed sensor going dark is itself a detection",
+          "Ignore it unless a user files a ticket",
+          "Wait 24 hours to see if it comes back"
+        ],
+        "correct_index": 1,
+        "explanation": "Defense evasion against the security stack is one of the strongest signals you get. A managed sensor going dark — especially right after a service-stop command — should raise severity, not lower it. Absence of telemetry is an indicator, not an all-clear."
+      }
+    },
+    {
+      "narrative": "With the endpoint blinded, the operator dumps LSASS process memory to harvest cached domain credentials, capturing the treasury user's password hash and, critically, a cached credential for a shared service account used by the reconciliation batch jobs.",
+      "tactic": "credential-access",
+      "technique": { "id": "T1003.001", "name": "OS Credential Dumping: LSASS Memory" },
+      "analyst_view": "LSASS access from a non-system, unsigned process is a textbook credential-dumping signal (Sysmon Event ID 10 with GrantedAccess like 0x1010/0x1410). Even when the tool is renamed or reflectively loaded, the handle request to lsass.exe with those access masks is hard to disguise. This is the pivot from single-host compromise to domain-wide risk.",
+      "log_source": "Sysmon Event ID 10 (process access to lsass.exe) / Defender credential-theft alerts",
+      "detection": {
+        "platform": "Sentinel KQL",
+        "query": "DeviceEvents\n| where ActionType == \"ProcessAccessedLsass\" or (FileName =~ \"lsass.exe\")\n| where InitiatingProcessFileName !in~ (\"wininit.exe\", \"services.exe\", \"MsMpEng.exe\", \"csrss.exe\")\n| where InitiatingProcessTokenElevation == \"TokenElevationTypeFull\"\n| project Timestamp, DeviceName, AccountName, InitiatingProcessFileName, InitiatingProcessCommandLine"
+      },
+      "quiz": {
+        "question": "Why is LSASS credential dumping the most consequential step in this whole chain so far?",
+        "options": [
+          "It encrypts the victim's files",
+          "It yields reusable domain credentials, turning a single-host compromise into domain-wide risk",
+          "It sends the ransom note",
+          "It deletes the Windows event log"
+        ],
+        "correct_index": 1,
+        "explanation": "Encryption comes later. Dumping LSASS harvests reusable domain credentials — here including a shared service account — which is what lets the attacker move off the first host and threaten the whole estate. It is the hinge between local and domain-wide compromise."
+      }
+    },
+    {
+      "narrative": "Using the stolen credentials, the operator maps the network: querying Active Directory for domain controllers, file servers, and the hosts belonging to the 'Payments' and 'Reconciliation' security groups. They are building a target list of the systems whose encryption would halt the bank's settlement operations.",
+      "tactic": "discovery",
+      "technique": { "id": "T1018", "name": "Remote System Discovery" },
+      "analyst_view": "Discovery is quiet by design, but it has a shape: a single workstation issuing a burst of LDAP/net queries and touching many hosts it never normally contacts. Correlate net.exe / nltest / AD reconnaissance from a treasury endpoint — that host has no business enumerating domain controllers. Volume and out-of-role behaviour are the signal.",
+      "log_source": "Windows Security (4688 process creation) + domain controller LDAP query logs",
+      "detection": {
+        "platform": "Splunk SPL",
+        "query": "index=windows EventCode=4688\n| eval proc=lower(New_Process_Name)\n| search proc IN (\"*\\\\net.exe\", \"*\\\\net1.exe\", \"*\\\\nltest.exe\", \"*\\\\dsquery.exe\", \"*\\\\nslookup.exe\")\n| stats dc(New_Process_Name) as tool_variety count as exec_count values(Process_Command_Line) as cmds by Computer, Account_Name\n| where exec_count > 8\n| sort - exec_count"
+      },
+      "quiz": {
+        "question": "Discovery commands like net.exe and nltest are also run by legitimate admins. What makes this activity anomalous?",
+        "options": [
+          "The commands were run at all — they are always malicious",
+          "A treasury workstation issuing a burst of domain-enumeration queries is acting out of role",
+          "The commands returned no results",
+          "The commands were run over HTTPS"
+        ],
+        "correct_index": 1,
+        "explanation": "These tools are legitimate in the right hands. The anomaly is context: a treasury operator's endpoint has no operational reason to enumerate domain controllers and host groups in a burst. Out-of-role behaviour plus volume is what separates recon from routine admin work."
+      }
+    },
+    {
+      "narrative": "Armed with a target list, the operator moves laterally to a file server hosting the reconciliation share, authenticating over SMB with the stolen service-account credentials and copying tooling into the C$ admin share. No exploit is used — this is valid credentials plus native Windows remoting.",
+      "tactic": "lateral-movement",
+      "technique": { "id": "T1021.002", "name": "Remote Services: SMB/Windows Admin Shares" },
+      "analyst_view": "Living-off-the-land lateral movement produces valid logons, so you hunt the pattern, not a malware alert: a service account logging on interactively/network to hosts it never normally touches (4624 Type 3), writes to C$/ADMIN$, and remote service creation (7045). Baseline where each service account is supposed to authenticate — deviation is the signal.",
+      "log_source": "Windows Security 4624 (logon type 3) + 5145 (file share access) + 7045 (service install)",
+      "detection": {
+        "platform": "Sentinel KQL",
+        "query": "SecurityEvent\n| where EventID == 5145\n| where ShareName in~ (\"\\\\\\\\*\\\\C$\", \"\\\\\\\\*\\\\ADMIN$\")\n| where AccountType == \"User\"\n| summarize HostsTouched = dcount(Computer), Files = make_set(RelativeTargetName, 20) by Account, bin(TimeGenerated, 1h)\n| where HostsTouched > 3\n// Enrichment: join Account against expected-service-account host baseline (not present in lab)."
+      },
+      "quiz": {
+        "question": "The attacker uses valid stolen credentials over SMB — no exploit, no malware alert. What is the most effective way to detect this lateral movement?",
+        "options": [
+          "Wait for antivirus to flag the copied tools",
+          "Baseline where each service account normally authenticates and alert on deviation",
+          "Block all SMB traffic across the bank",
+          "Rely on the file server's screensaver lock"
+        ],
+        "correct_index": 1,
+        "explanation": "Valid-credential lateral movement generates legitimate-looking logons, so signatures won't fire. Behavioural baselining — knowing which hosts a service account should ever touch, and alerting when it reaches new ones — is what surfaces the abuse."
+      }
+    },
+    {
+      "narrative": "The implant on the file server establishes command-and-control, beaconing to an attacker-controlled server over HTTPS. The traffic is disguised as routine web requests to a domain that mimics a software-update service, using regular jittered intervals to blend into normal browsing noise.",
+      "tactic": "command-and-control",
+      "technique": { "id": "T1071.001", "name": "Application Layer Protocol: Web Protocols" },
+      "analyst_view": "HTTPS C2 hides the payload, but the beacon has a rhythm. Hunt for periodicity: consistent request sizes and near-regular intervals to a low-reputation or newly-registered domain, from a server that should not be freely browsing the web. Beaconing analytics and newly-observed-domain enrichment beat trying to read encrypted content.",
+      "log_source": "Network proxy / firewall egress logs + DNS query logs (newly-observed-domain enrichment)",
+      "detection": {
+        "platform": "Elastic (KQL)",
+        "query": "event.category:\"network\" and destination.domain:* and network.protocol:\"https\"\nand not destination.domain: (*.yourbank.com or *.windowsupdate.com or *.microsoft.com)\nand source.ip: <file_server_subnet>\n// Rank candidates by beacon regularity (low stddev of inter-request interval)\n// and newly-registered-domain age < 30 days. Domain-age lookup absent in lab."
+      },
+      "quiz": {
+        "question": "The C2 traffic is HTTPS, so its contents are encrypted. What network characteristic best exposes the beacon without decrypting it?",
+        "options": [
+          "The exact bytes of the encrypted payload",
+          "Regular, jittered periodicity to a low-reputation / newly-registered domain",
+          "The TLS certificate's colour",
+          "The number of packets per second only"
+        ],
+        "correct_index": 1,
+        "explanation": "You can't read encrypted content, but you can see behaviour: a beacon's near-regular timing, consistent sizing, and destination reputation. Periodicity to a newly-registered domain from a server that shouldn't browse is the tell."
+      }
+    },
+    {
+      "narrative": "Before deploying ransomware, the operator exfiltrates data for double extortion. Reconciliation records and customer payment files are staged as a compressed archive and pushed out over the existing C2 channel — leverage for the ransom demand even if the bank restores from backup.",
+      "tactic": "exfiltration",
+      "technique": { "id": "T1041", "name": "Exfiltration Over C2 Channel" },
+      "analyst_view": "The signal is directional volume: a server that normally receives data now sending an anomalous outbound transfer, often preceded by local archiving (rar/7z/zip). Watch upload byte-count anomalies to the same C2 destination, and correlate with archive-creation on the host. Catching exfiltration is your last chance to act before encryption.",
+      "log_source": "Proxy/firewall byte-count (outbound) logs + EDR file-archive creation events",
+      "detection": {
+        "platform": "Splunk SPL",
+        "query": "index=proxy action=allowed\n| stats sum(bytes_out) as total_out sum(bytes_in) as total_in by src_ip, dest_host, _time span=1h\n| eval out_ratio = total_out / (total_in + 1)\n| where total_out > 500000000 AND out_ratio > 5\n| lookup asset_inventory src_ip OUTPUT role\n| where role=\"server\"\n| sort - total_out"
+      },
+      "quiz": {
+        "question": "In a double-extortion ransomware case, why does exfiltration matter to defenders even if the bank has good backups?",
+        "options": [
+          "It doesn't — backups make exfiltration irrelevant",
+          "Stolen data gives the attacker leverage (leak threat) independent of encryption, and catching it is the last window to act before files are locked",
+          "Exfiltration only affects email",
+          "It just slows the network down"
+        ],
+        "correct_index": 1,
+        "explanation": "Double extortion decouples the threat from encryption: even a clean restore doesn't undo a data leak. Exfiltration is also the last observable stage before encryption fires — detecting the outbound spike is the final chance to contain."
+      }
+    },
+    {
+      "narrative": "With data in hand, the operator prepares to make recovery impossible. Volume Shadow Copies are deleted and the boot recovery configuration is disabled, so victims cannot roll systems back after encryption. This is the immediate precursor to the encryption event.",
+      "tactic": "impact",
+      "technique": { "id": "T1490", "name": "Inhibit System Recovery" },
+      "analyst_view": "Shadow-copy deletion is one of the most reliable pre-encryption tripwires in the whole chain. 'vssadmin delete shadows', 'wmic shadowcopy delete', and 'bcdedit /set recoveryenabled no' are unambiguous — legitimate use is rare. An alert here should be treated as ransomware-in-progress and trigger immediate isolation, not a triage queue.",
+      "log_source": "EDR process-creation / command-line telemetry (Sysmon Event ID 1, Security 4688)",
+      "detection": {
+        "platform": "Sigma",
+        "query": "title: Shadow Copy Deletion / Recovery Inhibition (Ransomware Precursor)\nlogsource:\n  product: windows\n  category: process_creation\ndetection:\n  vss:\n    CommandLine|contains:\n      - 'vssadmin delete shadows'\n      - 'vssadmin resize shadowstorage'\n      - 'wmic shadowcopy delete'\n      - 'bcdedit /set {default} recoveryenabled no'\n      - 'wbadmin delete catalog'\n  condition: vss\nlevel: critical"
+      },
+      "quiz": {
+        "question": "An alert fires for 'vssadmin delete shadows'. How should this be prioritised?",
+        "options": [
+          "Low — it's a routine backup maintenance command",
+          "Critical and immediate — shadow-copy deletion is a near-unambiguous ransomware precursor warranting instant isolation",
+          "Informational — log it for the monthly report",
+          "Medium — investigate within a week"
+        ],
+        "correct_index": 1,
+        "explanation": "Legitimate use of shadow-copy deletion is rare, and attackers do it to stop victims recovering. It is one of the clearest pre-encryption tripwires — an alert here means act now (isolate the host), not schedule triage."
+      }
+    },
+    {
+      "narrative": "At 02:40, with recovery disabled and data already stolen, the ransomware executes across the targeted payments and reconciliation servers. Files are encrypted and renamed with a new extension, ransom notes are dropped in every directory, and the settlement systems go down at the worst possible moment in the banking day.",
+      "tactic": "impact",
+      "technique": { "id": "T1486", "name": "Data Encrypted for Impact" },
+      "analyst_view": "By the time mass encryption starts, detection has failed its primary goal — but automated response still limits blast radius. The signature is unmistakable: a single process performing high-volume file modifications with rising entropy and a uniform new extension, plus ransom-note files appearing estate-wide. This is where every missed upstream signal is paid for; the lesson is to catch it at steps 1–11.",
+      "log_source": "EDR file-modification telemetry + file-server audit (mass rename / extension change)",
+      "detection": {
+        "platform": "Microsoft Defender KQL",
+        "query": "DeviceFileEvents\n| where ActionType in (\"FileModified\", \"FileRenamed\", \"FileCreated\")\n| summarize FilesTouched = dcount(FileName),\n            Extensions = make_set(tostring(split(FileName, \".\")[-1]), 10)\n          by DeviceName, InitiatingProcessId, InitiatingProcessFileName, bin(Timestamp, 5m)\n| where FilesTouched > 300\n| where Extensions has_any (\"locked\", \"encrypted\", \"crypt\")\n| project Timestamp, DeviceName, InitiatingProcessFileName, FilesTouched, Extensions"
+      },
+      "quiz": {
+        "question": "Mass encryption has begun. What is the honest lesson this final stage teaches a detection engineer?",
+        "options": [
+          "Encryption is the only stage worth building detections for",
+          "By this point primary detection has already failed — the payoff comes from catching the eleven upstream stages first",
+          "Nothing could have prevented this",
+          "Backups make all upstream detection unnecessary"
+        ],
+        "correct_index": 1,
+        "explanation": "Detecting encryption still helps automated response cap the blast radius, but the encryption event means every earlier opportunity was missed. The real value of this walkthrough is that each of the previous eleven stages was detectable — defense is built upstream, not at the ransom note."
+      }
+    }
+  ],
+  "closing_summary": {
+    "headline": "Ransomware is the last chapter, not the story. This intrusion was observable at eleven stages before a single file was encrypted.",
+    "teaching_points": [
+      "Every ATT&CK stage in this chain left telemetry — phishing at the mail layer, execution in process lineage, credential theft in LSASS access, lateral movement in out-of-role logons. Encryption was the first stage the victim could not miss, and by then it was too late.",
+      "The strongest detections targeted attacker behaviour, not malware files: process parent/child relationships, sensor tampering, credential-dumping handles, and beacon periodicity all fired without a signature match.",
+      "Defense evasion is a detection opportunity, not a dead end. A managed EDR sensor going silent is a high-severity signal — absence of telemetry is itself telemetry.",
+      "Context turns benign tools into alerts. net.exe, PowerShell, and SMB are all legitimate; what made them malicious was an out-of-role host doing them in an anomalous volume. Baselining beats blocklisting.",
+      "Pre-encryption tripwires — shadow-copy deletion, recovery inhibition, outbound data spikes — are the highest-value, near-unambiguous alerts. Treat them as ransomware-in-progress and isolate, don't triage.",
+      "Four ATT&CK tactics never appeared in this scenario (Reconnaissance, Resource Development, Privilege Escalation, Collection-as-a-distinct-stage). Coverage is scenario-specific: a matrix greyed out here is not a gap you can ignore, it's a reminder that the next intrusion will light up different columns."
+    ],
+    "next_activity_suggestion": "Take one stage where your organisation currently has no detection, and draft a hunt query for it. Then map this scenario onto the ATT&CK Navigator and compare its lit-up tactics against your own detection-coverage heatmap — the overlap (and the gaps) is your next sprint's backlog."
+  }
+}

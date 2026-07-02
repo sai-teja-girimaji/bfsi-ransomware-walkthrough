@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="An interactive, step-by-step teaching walkthrough of a BFSI ransomware intrusion mapped to the MITRE ATT&CK Enterprise matrix — a portfolio piece by a detection engineering practitioner." />
+  <title>BFSI Ransomware Walkthrough — ATT&amp;CK Teaching Tool</title>
+  <link rel="stylesheet" href="styles.css" />
+  <!-- Prism.js (syntax highlighting) via CDN — the only external dependency -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true"></div>
+      <div>
+        <h1 class="brand-title">BFSI Ransomware Walkthrough</h1>
+        <p class="brand-sub">An interactive MITRE ATT&amp;CK intrusion, one tactic at a time</p>
+      </div>
+    </div>
+    <div class="header-actions">
+      <div class="score-readout" id="score-readout" hidden>
+        <span class="score-readout-label">Score</span>
+        <span class="score-readout-value" id="score-readout-value">0 / 0</span>
+      </div>
+      <a class="btn btn-ghost" href="https://attack.mitre.org/matrices/enterprise/" target="_blank" rel="noopener">ATT&amp;CK Matrix</a>
+    </div>
+  </header>
+
+  <main class="container" id="app">
+    <!-- Views are rendered dynamically by app.js. This is a graceful pre-JS / loading state. -->
+    <p class="empty-state" id="loading-state">Loading scenario…</p>
+  </main>
+
+  <footer class="site-footer">
+    <p>
+      MITRE ATT&amp;CK&reg; is a registered trademark of The MITRE Corporation. This tool is an independent
+      teaching project and is not affiliated with or endorsed by MITRE. The scenario and detections shown are
+      illustrative and intended for classroom instruction.
+    </p>
+  </footer>
+
+  <!-- Prism core + language components (CDN). classic scripts, order matters. -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-clike.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-powershell.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
