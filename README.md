@@ -11,6 +11,8 @@ each stage *before* the analyst view and detection logic are revealed.
 The only external resource is [Prism.js](https://prismjs.com/) via CDN for
 syntax-highlighting the detection queries.
 
+![Screenshot of the walkthrough at step 6 — the kill-chain tactics bar shows passed tactics in green, the current tactic (Credential Access) highlighted, and unused tactics greyed; below, an answered quiz reveals the analyst view, log source, and a syntax-highlighted Sentinel KQL detection.](screenshot.png)
+
 ## Run locally
 
 Browsers block `fetch()` on `file://` URLs, so serve the folder over HTTP:
